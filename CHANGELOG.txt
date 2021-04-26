@@ -1,0 +1,9 @@
+## 1.1.0
+
+- New features:
+	- RequestSending event handler to show live http request details
+	- RequestException added - throwed when there an error ocurred while reading response content
+	
+- Changed/fixed:
+	- GetCurrentAccountBalances method fix
+	

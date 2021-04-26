@@ -23,12 +23,14 @@
         ACK, RESULT, FULL
     }
 
-    public enum ErrorCode
+    public enum APIErrorCode
     {
         NO_SUCH_ORDER = -2013,
         INVALID_TIMESTAMP = -1021,
         BALANCE_NOT_ENOUGH = -6012,
-        CANCEL_REJECTED = -2011
+        CANCEL_REJECTED = -2011,
+        REJECTED_MBX_KEY = -2015,
+        INVALID_SIGNATURE = -1022
     }
 
     public enum OrderStatus

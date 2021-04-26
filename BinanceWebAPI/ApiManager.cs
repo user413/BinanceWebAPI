@@ -8,8 +8,31 @@ using Newtonsoft.Json;
 
 namespace BinanceWebAPI
 {
+    public delegate void RequestSending(object sender, HTTPRequestArgs args);
+
+    public class HTTPRequestArgs : EventArgs
+    {
+        public HttpMethod Method { get; set; }
+        public Uri Uri{ get; set; }
+        public HttpContent Content { get; set; }
+        public System.Net.Http.Headers.HttpRequestHeaders Headers { get; set; }
+    }
+
     public class BinanceAPI
     {
+        public event RequestSending RequestSending;
+        private void OnRequestSending(HttpRequestMessage msg)
+        {
+            if (RequestSending == null) return;
+            RequestSending(this, new HTTPRequestArgs
+            {
+                Content = msg.Content,
+                Headers = msg.Headers,
+                Method = msg.Method,
+                Uri = msg.RequestUri
+            });
+        }
+
         private readonly HttpClient Client = new HttpClient();
         private HMACSHA256 HashObj = new HMACSHA256();
         private string BaseEndpoint = "";
@@ -205,7 +228,7 @@ namespace BinanceWebAPI
                 (limit == 0 ? "" : "&limit=" + limitStr) +
                 "&timestamp=" + timestampStr + "&recvWindow=" + recvWindowStr;
 
-            return GetRequest(BaseEndpoint + $"{endpoint}?{data}&signature={GenerateSignature(data)}");
+            return GetRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}");
         }
 
         public object GetExchangeInfo()
@@ -220,7 +243,7 @@ namespace BinanceWebAPI
             HandleRequestDelay();
             string endpoint = "/api/v3/ticker/price";
             string data = symbol == "" ? "" : "symbol=" + symbol;
-            return GetRequest(BaseEndpoint + $"{endpoint}?{data}");
+            return GetRequest($"{BaseEndpoint}{endpoint}?{data}");
         }
 
 
@@ -237,6 +260,13 @@ namespace BinanceWebAPI
         //{
         //    "listenKey": "pqia91ma19a5s61cv6a81va65sdf19v8a65a1a5s61cv6a81va65sdf19v8a65a1"
         //}
+
+        public object CloseListenKey(string listenKey)
+        {
+            HandleRequestDelay();
+            return DeleteRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}");
+        }
+
 
         public object GetTradeFee(string symbol = "", int recvWindow = 5000)
         {
@@ -256,11 +286,14 @@ namespace BinanceWebAPI
             return PutRequest(BaseEndpoint + $"{endpoint}?listenKey={listenKey}");
         }
 
-        public object CloseListenKey(string listenKey)
+        public object GetCurrentAccountBalances(int recvWindow = 5000)
         {
             HandleRequestDelay();
-            string endpoint = "/api/v3/userDataStream";
-            return DeleteRequest($"{BaseEndpoint + endpoint}?listenKey={listenKey}");
+            string endpoint = "/sapi/v1/capital/config/getall";
+            string timestampStr = GetCurrentUnixTimeMillisecondsStr();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+            string data = $"timestamp={timestampStr}&recvWindow={recvWindowStr}";
+            return GetRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}");
         }
 
         //-- REQUEST METHODS
@@ -268,12 +301,14 @@ namespace BinanceWebAPI
         private object GetRequest(string url)
         {
             HttpRequestMessage msg = new HttpRequestMessage(HttpMethod.Get, url);
+            OnRequestSending(msg);
             return SendRequestSync(msg);
         }
 
         private object DeleteRequest(string url)
         {
             HttpRequestMessage msg = new HttpRequestMessage(HttpMethod.Delete, url);
+            OnRequestSending(msg);
             return SendRequestSync(msg);
         }
 
@@ -281,25 +316,36 @@ namespace BinanceWebAPI
         {
             HttpRequestMessage msg = new HttpRequestMessage(HttpMethod.Post, url);
             if (content != null) msg.Content = new FormUrlEncodedContent(content);
+            OnRequestSending(msg);
             return SendRequestSync(msg);
         }
 
         private object PutRequest(string url)
         {
             HttpRequestMessage msg = new HttpRequestMessage(HttpMethod.Put, url);
+            OnRequestSending(msg);
             return SendRequestSync(msg);
         }
 
         private object SendRequestSync(HttpRequestMessage msg)
         {
             HttpResponseMessage response;
+            string result;
 
             try
             {
                 response = Client.SendAsync(msg).Result;
+                result = response.Content.ReadAsStringAsync().Result;
+                //if (response.StatusCode == HttpStatusCode.NotFound) response.EnsureSuccessStatusCode();
             }
             catch (Exception e)
             {
+                //if (response != null)
+                //{
+                //    if (response.StatusCode == HttpStatusCode.NotFound)
+                //        throw new ResponseException("404 not found was returned from the request.", response.StatusCode, "", null);
+                //}
+
                 if (e.GetType() == typeof(AggregateException))
                 {
                     while (e.InnerException != null)
@@ -309,27 +355,33 @@ namespace BinanceWebAPI
                 throw e;
             }
 
-            object resultJson = null;
-            bool responseIsJson = true;
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                throw new ResponseException("404 not found was returned from the request.", response.StatusCode, result, null);
+
+            object resultJson;
+            //bool responseIsJson = true;
 
             try
             {
-                resultJson = JsonConvert.DeserializeObject(response.Content.ReadAsStringAsync().Result);
+                resultJson = JsonConvert.DeserializeObject(result);
             }
-            catch (Exception)
+            catch (Exception e)
             {
-                if (response.StatusCode == HttpStatusCode.OK)
-                    throw new Exception("Error while deserializing content.");
+                //if (response.StatusCode == HttpStatusCode.OK)
+                    //throw; //new Exception("Error while deserializing content.");
+                    throw new ResponseException("Failed to deserialize response content.", response.StatusCode, result, e);
 
-                responseIsJson = false;
+                //responseIsJson = false;
             }
 
-            if (response.StatusCode != HttpStatusCode.OK)
+            if (!response.IsSuccessStatusCode) //StatusCode != HttpStatusCode.OK)
             {
-                if (responseIsJson)
+                //if (responseIsJson)
                     HandleBinanceErrorResponse(response, resultJson);
-                else
-                    throw new Exception($"{(int)response.StatusCode} {response.StatusCode}");
+                //else
+                //    throw new Exception($"{(int)response.StatusCode} {response.StatusCode}");
+
+                //throw new System.Net.Sockets.SocketError.
             }
 
             return resultJson;
@@ -337,40 +389,48 @@ namespace BinanceWebAPI
 
         private void HandleBinanceErrorResponse(HttpResponseMessage response, dynamic resultJson)
         {
-            ErrorCode errorCode;
+            APIErrorCode errorCode;
             string message;
 
             try
             {
-                errorCode = (ErrorCode)int.Parse(resultJson.code.ToString());
+                errorCode = (APIErrorCode)int.Parse(resultJson.code.ToString());
                 message = resultJson.msg.ToString();
             }
-            catch (Exception)
+            catch (Exception e)
             {
-                //-- THROWS AN EXCEPTION WITH A MESSAGE CONTAINING HTTP STATUS CODE
-                throw new Exception($"{(int)response.StatusCode} {response.StatusCode + Environment.NewLine + resultJson}");
+                //throw new Exception($"{(int)response.StatusCode} {response.StatusCode + Environment.NewLine + resultJson}");
+                throw new ResponseException("Failed to deserialize API error response.", response.StatusCode, resultJson, e);
             }
 
-            //-- THROWS A BINANCEAPIAEXCEPTION IF THE RETURNED JSON CONTENT IS A BINANCE ERROR CODE
-            throw new BinanceAPIRequestException(message, errorCode, response.StatusCode);
-        }
-
-        public void GetCurrentAccountBalance()
-        {
-            throw new NotImplementedException();
+            //-- THROWS A BINANCEAPIAEXCEPTION IF THE RETURNED JSON CONTENT IS AN ERROR CODE FROM THE API
+            throw new BinanceAPIException(message, errorCode, response.StatusCode);
         }
     }
 
-    public class BinanceAPIRequestException : Exception
+    public class BinanceAPIException : Exception
     {
-        public ErrorCode ErrorCode { get; }
+        public APIErrorCode ErrorCode { get; }
         public HttpStatusCode StatusCode { get; }
 
-        public BinanceAPIRequestException(string message, ErrorCode errorCode, HttpStatusCode statusCode)
+        public BinanceAPIException(string message, APIErrorCode errorCode, HttpStatusCode statusCode)
             : base(message)
         {
             ErrorCode = errorCode;
             StatusCode = statusCode;
+        }
+    }
+
+    public class ResponseException : Exception
+    {
+        public HttpStatusCode StatusCode { get; }
+        public string ResponseText { get; }
+
+        public ResponseException(string message, HttpStatusCode statusCode, string responseText, Exception innerException)
+            : base(message, innerException)
+        {
+            StatusCode = statusCode;
+            ResponseText = responseText;
         }
     }
 }
