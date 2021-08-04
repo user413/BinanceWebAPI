@@ -22,6 +22,10 @@
     {
         ACK, RESULT, FULL
     }
+    public enum MarketOrderQtyType
+    {
+        Base, Quote
+    }
 
     public enum APIErrorCode
     {
@@ -42,5 +46,40 @@
         PENDING_CANCEL,
         REJECTED,
         EXPIRED
+    }
+
+    public enum ChartInterval
+    {
+        ONE_MIN,
+        THREE_MIN,
+        FIVE_MIN,
+        FIFTEEN_MIN,
+        THIRTY_MIN,
+        ONE_HOUR,
+        TWO_HOUR,
+        FOUR_HOUR,
+        SIX_HOUR,
+        EIGHT_HOUR,
+        TWELVE_HOUR,
+        ONE_DAY,
+        THREE_DAY,
+        ONE_WEEK,
+        ONE_MONTH
+    }
+
+    public enum CSDataProperty
+    {
+        OpenTime,
+        Open,
+        High,
+        Low,
+        Close,
+        Volume,
+        CloseTime,
+        QuoteAssetVolume,
+        NumberOfTrades,
+        TakerBuyBaseAssetVolume,
+        TakerBuyQuoteAssetVolume,
+        Ignore
     }
 }
