@@ -4,7 +4,7 @@ using System.Text;
 using System.Net.Http;
 using System.Net;
 using System.Security.Cryptography;
-using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace BinanceWebAPI
 {
@@ -13,12 +13,12 @@ namespace BinanceWebAPI
     public class HTTPRequestArgs : EventArgs
     {
         public HttpMethod Method { get; set; }
-        public Uri Uri{ get; set; }
+        public Uri Uri { get; set; }
         public HttpContent Content { get; set; }
         public System.Net.Http.Headers.HttpRequestHeaders Headers { get; set; }
     }
 
-    public class BinanceAPI
+    public class BinanceAPI : IDisposable
     {
         public event RequestSending RequestSending;
         private void OnRequestSending(HttpRequestMessage msg)
@@ -37,7 +37,7 @@ namespace BinanceWebAPI
         private HMACSHA256 HashObj = new HMACSHA256();
         private string BaseEndpoint = "";
         private DateTime LastRequestTime = new DateTime();
-        private int RequestDelayMilliseconds = 1000; //-- DELAY IN MILLISECONDS BETWEEN EVERY REQUEST
+        private int RequestDelayMilliseconds; //-- DELAY IN MILLISECONDS BETWEEN EVERY REQUEST
         private readonly object APILockObj = new object();
 
         public BinanceAPI(string baseEndpoint, string apiKey, string secretKey, int requestDelayMilliseconds)
@@ -81,7 +81,7 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/api/v3/ping", HttpMethod.Get);
         }
 
-        public object CreateLimitOrder(string symbol, OrderSide side, decimal quantity, decimal price, OrderTimeInForce timeInForce, string newClientOrderId = "",
+        public JObject CreateLimitOrder(string symbol, OrderSide side, decimal quantity, decimal price, OrderTimeInForce timeInForce, string newClientOrderId = "",
             int recvWindow = 5000, OrderRespType newOrderRespType = OrderRespType.FULL, bool testRequest = false)
         {
             HandleRequestDelay();
@@ -112,10 +112,10 @@ namespace BinanceWebAPI
             parameters.Add("timestamp", timestampStr);
             parameters.Add("signature", GenerateSignature(data));
 
-            return SendRequest($"{BaseEndpoint}{endpoint}", HttpMethod.Post, parameters);
+            return SendRequest($"{BaseEndpoint}{endpoint}", HttpMethod.Post, parameters) as JObject;
         }
 
-        public object CreateMarketOrder(string symbol, OrderSide side, MarketOrderQtyType quantityType, decimal quantity, string newClientOrderId = "",
+        public JObject CreateMarketOrder(string symbol, OrderSide side, MarketOrderQtyType quantityType, decimal quantity, string newClientOrderId = "",
             int recvWindow = 5000, OrderRespType newOrderRespType = OrderRespType.FULL, bool testRequest = false)
         {
             HandleRequestDelay();
@@ -142,10 +142,10 @@ namespace BinanceWebAPI
             parameters.Add("timestamp", timestampStr);
             parameters.Add("signature", GenerateSignature(data));
 
-            return SendRequest($"{BaseEndpoint}{endpoint}", HttpMethod.Post, parameters);
+            return SendRequest($"{BaseEndpoint}{endpoint}", HttpMethod.Post, parameters) as JObject;
         }
 
-        public object CancelOrder(string symbol, long orderId = 0, string newClientOrderId = "", int recvWindow = 5000)
+        public JObject CancelOrder(string symbol, long orderId = 0, string newClientOrderId = "", int recvWindow = 5000)
         {
             HandleRequestDelay();
 
@@ -156,10 +156,10 @@ namespace BinanceWebAPI
                 (newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}") +
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Delete);
+            return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Delete) as JObject;
         }
 
-        public object CancelOrder(string symbol, string origClientOrderId = "", string newClientOrderId = "", int recvWindow = 5000)
+        public JObject CancelOrder(string symbol, string origClientOrderId = "", string newClientOrderId = "", int recvWindow = 5000)
         {
             HandleRequestDelay();
 
@@ -170,10 +170,10 @@ namespace BinanceWebAPI
                 (newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}") +
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Delete);
+            return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Delete) as JObject;
         }
 
-        public object QueryOrder(string symbol, long orderId = 0, int recvWindow = 5000)
+        public JObject QueryOrder(string symbol, long orderId = 0, int recvWindow = 5000)
         {
             HandleRequestDelay();
 
@@ -182,10 +182,10 @@ namespace BinanceWebAPI
 
             string data = $"symbol={symbol}&orderId={orderId}&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
         }
 
-        public object QueryOrder(string symbol, string origClientOrderId, int recvWindow = 5000)
+        public JObject QueryOrder(string symbol, string origClientOrderId, int recvWindow = 5000)
         {
             HandleRequestDelay();
 
@@ -194,10 +194,10 @@ namespace BinanceWebAPI
 
             string data = $"symbol={symbol}&origClientOrderId={origClientOrderId}&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject ;
         }
 
-        public object QueryOpenOrders(string symbol = "", int recvWindow = 5000)
+        public JContainer QueryOpenOrders(string symbol = "", int recvWindow = 5000)
         {
             HandleRequestDelay();
             string timestampStr = GetCurrentUnixTimeMillisStr();
@@ -205,11 +205,11 @@ namespace BinanceWebAPI
 
             string data = (symbol == "" ? "" : $"symbol={symbol}&") + $"timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}/api/v3/openOrders?{data}&signature={GenerateSignature(data)}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}/api/v3/openOrders?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
         }
 
         //-- If orderId is set, it will get orders >= that orderId. Otherwise most recent orders are returned.
-        public object QueryAllOrders(string symbol, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
+        public JContainer QueryAllOrders(string symbol, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
             int limit = 500, int recvWindow = 5000)
         {
             HandleRequestDelay();
@@ -228,55 +228,55 @@ namespace BinanceWebAPI
                 (limit == 0 ? "" : $"&limit={limitStr}") +
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
         }
 
-        public object GetExchangeInfo()
+        public JObject GetExchangeInfo()
         {
             HandleRequestDelay();
-            return SendRequest($"{BaseEndpoint}/api/v3/exchangeInfo", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}/api/v3/exchangeInfo", HttpMethod.Get) as JObject;
         }
 
-        public object GetExchangeInfo(string symbol)
+        public JObject GetExchangeInfo(string symbol)
         {
             HandleRequestDelay();
-            return SendRequest($"{BaseEndpoint}/api/v3/exchangeInfo?symbol={symbol}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}/api/v3/exchangeInfo?symbol={symbol}", HttpMethod.Get) as JObject;
         }
 
-        public object GetExchangeInfo(string[] symbols)
+        public JObject GetExchangeInfo(string[] symbols)
         {
             HandleRequestDelay();
             string symbolsStr = "[\"" + string.Join("\",\"", symbols) + "\"]";
-            return SendRequest($"{BaseEndpoint}/api/v3/exchangeInfo?symbols={symbolsStr}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}/api/v3/exchangeInfo?symbols={symbolsStr}", HttpMethod.Get) as JObject;
         }
 
-        public object PriceTicker(string symbol = "")
+        public JObject PriceTicker(string symbol = "")
         {
             HandleRequestDelay();
             string data = symbol == "" ? "" : $"symbol={symbol}";
-            return SendRequest($"{BaseEndpoint}/api/v3/ticker/price?{data}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}/api/v3/ticker/price?{data}", HttpMethod.Get) as JObject;
         }
 
-        public object CandlestickData(string symbol, ChartInterval interval, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0, int limit = 500)
+        public JContainer CandlestickData(string symbol, ChartInterval interval, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0, int limit = 500)
         {
             HandleRequestDelay();
             string data = $"symbol={symbol}&interval={EnumToString(interval)}" + (startTimeUnixMillis > 0 ? $"&startTime={startTimeUnixMillis}" : "") +
                 (endTimeUnixMillis > 0 ? $"&endTime={endTimeUnixMillis}" : "") + (limit != 500 ? $"&limit={limit}" : "");
-            return SendRequest($"{BaseEndpoint}/api/v3/klines?{data}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}/api/v3/klines?{data}", HttpMethod.Get) as JContainer;
         }
 
-        public object AveragePrice(string symbol)
+        public JObject AveragePrice(string symbol)
         {
             HandleRequestDelay();
-            return SendRequest($"{BaseEndpoint}/api/v3/avgPrice?symbol={symbol}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}/api/v3/avgPrice?symbol={symbol}", HttpMethod.Get) as JObject;
         }
 
         //-- USER DATA STREAMS
 
-        public object CreateListenKey()
+        public JObject CreateListenKey()
         {
             HandleRequestDelay();
-            return SendRequest($"{BaseEndpoint}/api/v3/userDataStream", HttpMethod.Post);
+            return SendRequest($"{BaseEndpoint}/api/v3/userDataStream", HttpMethod.Post) as JObject;
         }
         //RESPONSE:
         //
@@ -284,50 +284,55 @@ namespace BinanceWebAPI
         //    "listenKey": "pqia91ma19a5s61cv6a81va65sdf19v8a65a1a5s61cv6a81va65sdf19v8a65a1"
         //}
 
-        public object CloseListenKey(string listenKey)
+        public void CloseListenKey(string listenKey)
         {
-            HandleRequestDelay();
-            return SendRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}", HttpMethod.Delete);
+            HandleRequestDelay ();
+            SendRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}", HttpMethod.Delete);
         }
 
 
-        public object GetTradeFee(string symbol = "", int recvWindow = 5000)
+        public JObject GetTradeFee(string symbol = "", int recvWindow = 5000)
         {
             HandleRequestDelay();
             string timestampStr = GetCurrentUnixTimeMillisStr();
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
             string data = (symbol == "" ? "" : $"symbol={symbol}&") + $"timestamp={timestampStr}&recvWindow={recvWindowStr}";
-            return SendRequest($"{BaseEndpoint}/sapi/v1/asset/tradeFee?{data}&signature={GenerateSignature(data)}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}/sapi/v1/asset/tradeFee?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
         }
 
-        public object RenewListenKey(string listenKey)
+        public void RenewListenKey(string listenKey)
         {
             HandleRequestDelay();
-            return SendRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}", HttpMethod.Put);
+            SendRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}", HttpMethod.Put);
         }
 
-        public object GetCurrentAccountBalances(int recvWindow = 5000)
+        public JContainer GetCurrentAccountBalances(int recvWindow = 5000)
         {
             HandleRequestDelay();
             string endpoint = "/sapi/v1/capital/config/getall";
             string timestampStr = GetCurrentUnixTimeMillisStr();
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
             string data = $"timestamp={timestampStr}&recvWindow={recvWindowStr}";
-            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get);
+            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
         }
 
         //-- REQUEST METHOD
 
-        private object SendRequest(string url, HttpMethod httpMethod, Dictionary<string, string> content = null)
+        //private JObject SendRequest(string url, HttpMethod httpMethod, Dictionary<string, string> content = null)
+        //{
+        //    HttpRequestMessage msg = new HttpRequestMessage(httpMethod, url);
+        //    if (content != null) msg.Content = new FormUrlEncodedContent(content);
+        //    OnRequestSending(msg);
+        //    return SendRequestSync(msg);
+        //}
+
+        //private JObject SendRequest(string url, HttpMethod httpMethod, Dictionary<string, string> content = null /*HttpRequestMessage msg*/)
+        private JToken SendRequest(string url, HttpMethod httpMethod, Dictionary<string, string> content = null /*HttpRequestMessage msg*/)
         {
             HttpRequestMessage msg = new HttpRequestMessage(httpMethod, url);
             if (content != null) msg.Content = new FormUrlEncodedContent(content);
             OnRequestSending(msg);
-            return SendRequestSync(msg);
-        }
 
-        private object SendRequestSync(HttpRequestMessage msg)
-        {
             HttpResponseMessage response;
             string result;
 
@@ -357,12 +362,17 @@ namespace BinanceWebAPI
             if (response.StatusCode == HttpStatusCode.NotFound)
                 throw new ResponseException("404 not found was returned from the request.", response.StatusCode, result, null);
 
-            object resultJson;
+            //JObject resultJson;
+            JToken resultJson;
             //bool responseIsJson = true;
 
             try
             {
-                resultJson = JsonConvert.DeserializeObject(result);
+                resultJson = JToken.Parse(result);
+                //resultJson = Newtonsoft.Json.JsonConvert.DeserializeObject<j>(result);
+                //resultJson = JObject.Parse(result);
+                //var dd = Newtonsoft.Json.Linq.JObject.Parse(result);
+                //var r = dd["sdff"];
             }
             catch (Exception e)
             {
@@ -448,6 +458,11 @@ namespace BinanceWebAPI
             }
 
             return e.ToString();
+        }
+
+        public void Dispose()
+        {
+            ((IDisposable)Client).Dispose();
         }
     }
 

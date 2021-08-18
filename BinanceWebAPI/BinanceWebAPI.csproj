@@ -26,7 +26,7 @@
   </ItemGroup>
 
   <Target Name="CopyPackage" AfterTargets="Pack">
-    <Copy SourceFiles="$(ProjectDir)\bin\release\$(PackageId).$(PackageVersion).nupkg" DestinationFolder="C:\Users\Nobody\Google Drive\WORKSPACE\NUGET-PACKAGES" />
+    <Copy SourceFiles="$(ProjectDir)\bin\release\$(PackageId).$(PackageVersion).nupkg" DestinationFolder="..\..\..\..\NUGET-PACKAGES" />
   </Target>
 
 </Project>
