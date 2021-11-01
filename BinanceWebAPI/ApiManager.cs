@@ -5,10 +5,13 @@ using System.Net.Http;
 using System.Net;
 using System.Security.Cryptography;
 using Newtonsoft.Json.Linq;
+using WebSocketSharp;
 
 namespace BinanceWebAPI
 {
     public delegate void RequestSending(object sender, HTTPRequestArgs args);
+    //public delegate void MarginWSConnected(object sender, EventArgs args);
+    //public delegate void MarginWSError(object sender, EventArgs args);
 
     public class HTTPRequestArgs : EventArgs
     {
@@ -21,6 +24,9 @@ namespace BinanceWebAPI
     public class BinanceAPI : IDisposable
     {
         public event RequestSending RequestSending;
+        //public event MarginWSConnected MarginWSConnected;
+        //public event MarginWSError MarginWSError;
+
         private void OnRequestSending(HttpRequestMessage msg)
         {
             if (RequestSending == null) return;
@@ -33,12 +39,26 @@ namespace BinanceWebAPI
             });
         }
 
+        //private void OnMarginWSConnected()
+        //{
+        //    if (MarginWSConnected == null) return;
+        //    MarginWSConnected(this, EventArgs.Empty);
+        //}
+
+        //private void OnMarginWSError()
+        //{
+        //    if (MarginWSError == null) return;
+        //    MarginWSError(this, EventArgs.Empty);
+        //}
+
         private readonly HttpClient Client = new HttpClient();
         private HMACSHA256 HashObj = new HMACSHA256();
         private string BaseEndpoint = "";
         private DateTime LastRequestTime = new DateTime();
         private int RequestDelayMilliseconds; //-- DELAY IN MILLISECONDS BETWEEN EVERY REQUEST
         private readonly object APILockObj = new object();
+
+        //private static WebSocket MarginWSCLient;
 
         public BinanceAPI(string baseEndpoint, string apiKey, string secretKey, int requestDelayMilliseconds)
         {
@@ -76,12 +96,13 @@ namespace BinanceWebAPI
             return Convert.ToInt64(DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalMilliseconds).ToString();
         }
 
-        public object Ping()
-        {
-            return SendRequest($"{BaseEndpoint}/api/v3/ping", HttpMethod.Get);
-        }
+        //public void MarginWSConnect()
+        //{
+        //    MarginWSCLient = new WebSocket()
+        //}
 
-        public JObject CreateLimitOrder(string symbol, OrderSide side, decimal quantity, decimal price, OrderTimeInForce timeInForce, string newClientOrderId = "",
+        //-- SPOT ACCOUNT
+        public JObject SpotLimitOrder(string symbol, OrderSide side, decimal quantity, decimal price, OrderTimeInForce timeInForce, string newClientOrderId = "",
             int recvWindow = 5000, OrderRespType newOrderRespType = OrderRespType.FULL, bool testRequest = false)
         {
             HandleRequestDelay();
@@ -115,7 +136,7 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}{endpoint}", HttpMethod.Post, parameters) as JObject;
         }
 
-        public JObject CreateMarketOrder(string symbol, OrderSide side, MarketOrderQtyType quantityType, decimal quantity, string newClientOrderId = "",
+        public JObject SpotMarketOrder(string symbol, OrderSide side, MarketOrderQtyType quantityType, decimal quantity, string newClientOrderId = "",
             int recvWindow = 5000, OrderRespType newOrderRespType = OrderRespType.FULL, bool testRequest = false)
         {
             HandleRequestDelay();
@@ -145,35 +166,33 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}{endpoint}", HttpMethod.Post, parameters) as JObject;
         }
 
-        public JObject CancelOrder(string symbol, long orderId = 0, string newClientOrderId = "", int recvWindow = 5000)
+        public JObject CancelSpotOrder(string symbol, long orderId, string newClientOrderId = "", int recvWindow = 5000)
         {
             HandleRequestDelay();
 
             string timestampStr = GetCurrentUnixTimeMillisStr();
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
 
-            string data = $"symbol={symbol}&orderId={orderId}" +
-                (newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}") +
+            string data = $"symbol={symbol}&orderId={orderId}{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}" +
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
             return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Delete) as JObject;
         }
 
-        public JObject CancelOrder(string symbol, string origClientOrderId = "", string newClientOrderId = "", int recvWindow = 5000)
+        public JObject CancelSpotOrder(string symbol, string origClientOrderId, string newClientOrderId = "", int recvWindow = 5000)
         {
             HandleRequestDelay();
 
             string timestampStr = GetCurrentUnixTimeMillisStr();
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
 
-            string data = $"symbol={symbol}&origClientOrderId={origClientOrderId}" +
-                (newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}") +
+            string data = $"symbol={symbol}&origClientOrderId={origClientOrderId}{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}" +
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
             return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Delete) as JObject;
         }
 
-        public JObject QueryOrder(string symbol, long orderId = 0, int recvWindow = 5000)
+        public JObject QuerySpotOrder(string symbol, long orderId = 0, int recvWindow = 5000)
         {
             HandleRequestDelay();
 
@@ -185,7 +204,7 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
         }
 
-        public JObject QueryOrder(string symbol, string origClientOrderId, int recvWindow = 5000)
+        public JObject QuerySpotOrder(string symbol, string origClientOrderId, int recvWindow = 5000)
         {
             HandleRequestDelay();
 
@@ -197,7 +216,7 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject ;
         }
 
-        public JContainer QueryOpenOrders(string symbol = "", int recvWindow = 5000)
+        public JContainer QuerySpotOpenOrders(string symbol = "", int recvWindow = 5000)
         {
             HandleRequestDelay();
             string timestampStr = GetCurrentUnixTimeMillisStr();
@@ -209,7 +228,7 @@ namespace BinanceWebAPI
         }
 
         //-- If orderId is set, it will get orders >= that orderId. Otherwise most recent orders are returned.
-        public JContainer QueryAllOrders(string symbol, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
+        public JContainer QueryAllSpotOrders(string symbol, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
             int limit = 500, int recvWindow = 5000)
         {
             HandleRequestDelay();
@@ -229,6 +248,12 @@ namespace BinanceWebAPI
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
             return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+        }
+
+        //-- MARKET DATA
+        public object Ping()
+        {
+            return SendRequest($"{BaseEndpoint}/api/v3/ping", HttpMethod.Get);
         }
 
         public JObject GetExchangeInfo()
@@ -272,25 +297,229 @@ namespace BinanceWebAPI
         }
 
         //-- USER DATA STREAMS
-
-        public JObject CreateListenKey()
+        public JObject CreateSpotListenKey()
         {
             HandleRequestDelay();
             return SendRequest($"{BaseEndpoint}/api/v3/userDataStream", HttpMethod.Post) as JObject;
         }
-        //RESPONSE:
-        //
-        //{
-        //    "listenKey": "pqia91ma19a5s61cv6a81va65sdf19v8a65a1a5s61cv6a81va65sdf19v8a65a1"
-        //}
 
-        public void CloseListenKey(string listenKey)
+        public void CloseSpotListenKey(string listenKey)
         {
-            HandleRequestDelay ();
+            HandleRequestDelay();
             SendRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}", HttpMethod.Delete);
         }
 
+        public void RenewSpotListenKey(string listenKey)
+        {
+            HandleRequestDelay();
+            SendRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}", HttpMethod.Put);
+        }
 
+        public JObject CreateMarginListenKey()
+        {
+            HandleRequestDelay();
+            return SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream", HttpMethod.Post) as JObject;
+        }
+
+        public void CloseMarginListenKey(string listenKey)
+        {
+            HandleRequestDelay();
+            SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream?listenKey={listenKey}", HttpMethod.Delete);
+        }
+
+        public void RenewMarginListenKey(string listenKey)
+        {
+            HandleRequestDelay();
+            SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream?listenKey={listenKey}", HttpMethod.Put);
+        }
+
+        public JObject CreateIsolatedMarginListenKey(string symbol)
+        {
+            HandleRequestDelay();
+            return SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream/isolated?symbol={symbol}", HttpMethod.Post) as JObject;
+        }
+
+        public void CloseIsolatedMarginListenKey(string symbol, string listenKey)
+        {
+            HandleRequestDelay();
+            SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream/isolated?symbol={symbol}&listenKey={listenKey}", HttpMethod.Delete);
+        }
+
+        public void RenewIsolatedMarginListenKey(string symbol, string listenKey)
+        {
+            HandleRequestDelay();
+            SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream/isolated?symbol={symbol}&listenKey={listenKey}", HttpMethod.Put);
+        }
+
+        //-- MARGIN ACCOUNT
+        public JObject MarginLimitOrder(string symbol, OrderSide side, decimal quantity, decimal price, OrderTimeInForce timeInForce, bool isIsolated = false,
+            OrderSideEffect sideEffectType = OrderSideEffect.NO_SIDE_EFFECT, string newClientOrderId = "", int recvWindow = 5000, 
+            OrderRespType newOrderRespType = OrderRespType.FULL)
+        {
+            HandleRequestDelay();
+            string sideStr = side.ToString();
+            string quantityStr = quantity.ToString("0.########");
+            string priceStr = price.ToString("0.########");
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+            string timeInForceStr = timeInForce.ToString();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+            string newOrderRespTypeStr = newOrderRespType.ToString();
+
+            string data = $"symbol={symbol}&side={sideStr}&type=LIMIT&quantity={quantityStr}&price={priceStr}" +
+                $"&timeInForce={timeInForceStr}{(isIsolated ? $"&isIsolated=TRUE" : "")}" +
+                $"{(sideEffectType == OrderSideEffect.NO_SIDE_EFFECT ? "" : $"&sideEffectType={sideEffectType}")}" +
+                $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}" +
+                $"&recvWindow={recvWindowStr}&newOrderRespType={newOrderRespTypeStr}&timestamp={timestampStr}";
+
+            var parameters = new Dictionary<string, string>();
+            parameters.Add("symbol", symbol);
+            parameters.Add("side", sideStr);
+            parameters.Add("type", "LIMIT");
+            parameters.Add("quantity", quantityStr);
+            parameters.Add("price", priceStr);
+            parameters.Add("timeInForce", timeInForceStr);
+            if (newClientOrderId != "") parameters.Add("newClientOrderId", newClientOrderId);
+            parameters.Add("recvWindow", recvWindowStr);
+            parameters.Add("newOrderRespType", newOrderRespTypeStr);
+            parameters.Add("timestamp", timestampStr);
+            parameters.Add("signature", GenerateSignature(data));
+
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/order", HttpMethod.Post, parameters) as JObject;
+        }
+
+        public JObject MarginMarketOrder(string symbol, OrderSide side, MarketOrderQtyType quantityType, decimal quantity, bool isIsolated = false,
+            OrderSideEffect sideEffectType = OrderSideEffect.NO_SIDE_EFFECT, string newClientOrderId = "", int recvWindow = 5000,
+            OrderRespType newOrderRespType = OrderRespType.FULL)
+        {
+            HandleRequestDelay();
+            string sideStr = side.ToString();
+            string quantityStr = quantity.ToString("0.########");
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+            string newOrderRespTypeStr = newOrderRespType.ToString();
+
+            string data = $"symbol={symbol}&side={sideStr}&type=MARKET{(quantityType == MarketOrderQtyType.Quote ? "&quoteOrderQty=" : "&quantity=")}{quantityStr}" +
+                $"{(isIsolated ? $"&isIsolated=TRUE" : "")}{(sideEffectType == OrderSideEffect.NO_SIDE_EFFECT ? "" : $"&sideEffectType={sideEffectType}")}" +
+                $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}&recvWindow={recvWindowStr}&newOrderRespType={newOrderRespTypeStr}" +
+                $"&timestamp={timestampStr}";
+
+            var parameters = new Dictionary<string, string>();
+            parameters.Add("symbol", symbol);
+            parameters.Add("side", sideStr);
+            parameters.Add("type", "MARKET");
+            if (quantityType == MarketOrderQtyType.Quote) parameters.Add("quoteOrderQty", quantityStr);
+            else parameters.Add("quantity", quantityStr);
+            parameters.Add("recvWindow", recvWindowStr);
+            parameters.Add("newOrderRespType", newOrderRespTypeStr);
+            parameters.Add("timestamp", timestampStr);
+            parameters.Add("signature", GenerateSignature(data));
+
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/order", HttpMethod.Post, parameters) as JObject;
+        }
+
+        public JObject CancelMarginOrder(string symbol, long orderId, bool isIsolated = false, string newClientOrderId = "", int recvWindow = 5000)
+        {
+            HandleRequestDelay();
+
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+
+            string data = $"symbol={symbol}&orderId={orderId}{(isIsolated ? $"&isIsolated=TRUE" : "")}" +
+                $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}&timestamp={timestampStr}&recvWindow={recvWindowStr}";
+
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Delete) as JObject;
+        }
+
+        public JObject CancelMarginOrder(string symbol, string origClientOrderId, bool isIsolated = false, string newClientOrderId = "", int recvWindow = 5000)
+        {
+            HandleRequestDelay();
+
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+
+            string data = $"symbol={symbol}&origClientOrderId={origClientOrderId}{(isIsolated ? $"&isIsolated=TRUE" : "")}" +
+                $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}&timestamp={timestampStr}&recvWindow={recvWindowStr}";
+
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Delete) as JObject;
+        }
+
+        public JObject QueryMarginOrder(string symbol, long orderId, bool isIsolated = false, int recvWindow = 5000)
+        {
+            HandleRequestDelay();
+
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+
+            string data = $"symbol={symbol}&orderId={orderId}{(isIsolated ? $"&isIsolated=TRUE" : "")}&timestamp={timestampStr}&recvWindow={recvWindowStr}";
+
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
+        }
+
+        public JObject QueryMarginOrder(string symbol, string origClientOrderId, bool isIsolated = false, int recvWindow = 5000)
+        {
+            HandleRequestDelay();
+
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+
+            string data = $"symbol={symbol}&origClientOrderId={origClientOrderId}{(isIsolated ? $"&isIsolated=TRUE" : "")}&timestamp={timestampStr}" +
+                $"&recvWindow={recvWindowStr}";
+
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
+        }
+
+        public JContainer QueryMarginOpenOrders(string symbol = "", bool isIsolated = false, int recvWindow = 5000)
+        {
+            HandleRequestDelay();
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+
+            string data = $"{(symbol == "" ? "" : $"symbol={symbol}&")}{(isIsolated ? $"isIsolated=TRUE" : "")}&timestamp={timestampStr}&recvWindow={recvWindowStr}";
+
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/openOrders?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+        }
+
+        //-- If orderId is set, it will get orders >= that orderId. Otherwise most recent orders are returned.
+        public JContainer QueryAllMarginOrders(string symbol, bool isIsolated = false, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
+            int limit = 500, int recvWindow = 5000)
+        {
+            HandleRequestDelay();
+
+            string orderIdStr = orderId.ToString();
+            string startTimeStr = startTimeUnixMillis.ToString();
+            string endTimeStr = endTimeUnixMillis.ToString();
+            string limitStr = (limit > 1000 ? 1000 : limit).ToString();
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+
+            string data = $"symbol={symbol}{(orderId == 0 ? "" : $"&orderId={orderIdStr}")}{(isIsolated ? $"&isIsolated=TRUE" : "")}" +
+                (startTimeUnixMillis == 0 ? "" : $"&startTime={startTimeStr}") +
+                (endTimeUnixMillis == 0 ? "" : $"&endTime={endTimeStr}") +
+                (limit == 0 ? "" : $"&limit={limitStr}") +
+                $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
+
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/allOrders?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+        }
+
+        public JObject MarginPriceIndex(string symbol)
+        {
+            HandleRequestDelay();
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/priceIndex?symbol={symbol}", HttpMethod.Get) as JObject;
+        }
+
+        //-- Max 5 symbols
+        public JContainer GetIsolatedMarginAccountInfo(string[] symbols = null, int recvWindow = 5000)
+        {
+            HandleRequestDelay();
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+            //string symbolsStr = "[\"" + string.Join("\",\"", symbols) + "\"]";
+
+            string data = $"{(symbols == null ? "" : $"symbols=\"{string.Join(",",symbols)}\"&")}timestamp={timestampStr}&recvWindow={recvWindowStr}";
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/isolated/account?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+        }
+
+        //-- WALLET
         public JObject GetTradeFee(string symbol = "", int recvWindow = 5000)
         {
             HandleRequestDelay();
@@ -300,13 +529,7 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/sapi/v1/asset/tradeFee?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
         }
 
-        public void RenewListenKey(string listenKey)
-        {
-            HandleRequestDelay();
-            SendRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}", HttpMethod.Put);
-        }
-
-        public JContainer GetCurrentAccountBalances(int recvWindow = 5000)
+        public JContainer GetSpotAccountCoins(int recvWindow = 5000)
         {
             HandleRequestDelay();
             string endpoint = "/sapi/v1/capital/config/getall";

@@ -14,6 +14,10 @@
     {
         BUY, SELL
     }
+    public enum OrderSideEffect
+    {
+        NO_SIDE_EFFECT, MARGIN_BUY, AUTO_REPAY
+    }
     public enum OrderTimeInForce
     {
         GTC, IOC, FOK
