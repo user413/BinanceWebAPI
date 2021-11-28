@@ -157,6 +157,7 @@ namespace BinanceWebAPI
             parameters.Add("side", sideStr);
             parameters.Add("type", "MARKET");
             if (quantityType == MarketOrderQtyType.Quote) parameters.Add("quoteOrderQty", quantityStr);
+            if (newClientOrderId != "") parameters.Add("newClientOrderId", newClientOrderId);
             else parameters.Add("quantity", quantityStr);
             parameters.Add("recvWindow", recvWindowStr);
             parameters.Add("newOrderRespType", newOrderRespTypeStr);
@@ -378,6 +379,8 @@ namespace BinanceWebAPI
             parameters.Add("quantity", quantityStr);
             parameters.Add("price", priceStr);
             parameters.Add("timeInForce", timeInForceStr);
+            if (isIsolated) parameters.Add("isIsolated", "TRUE");
+            if (sideEffectType != OrderSideEffect.NO_SIDE_EFFECT) parameters.Add("sideEffectType", sideEffectType.ToString());
             if (newClientOrderId != "") parameters.Add("newClientOrderId", newClientOrderId);
             parameters.Add("recvWindow", recvWindowStr);
             parameters.Add("newOrderRespType", newOrderRespTypeStr);
@@ -409,6 +412,9 @@ namespace BinanceWebAPI
             parameters.Add("type", "MARKET");
             if (quantityType == MarketOrderQtyType.Quote) parameters.Add("quoteOrderQty", quantityStr);
             else parameters.Add("quantity", quantityStr);
+            if (isIsolated) parameters.Add("isIsolated", "TRUE");
+            if (sideEffectType != OrderSideEffect.NO_SIDE_EFFECT) parameters.Add("sideEffectType", sideEffectType.ToString());
+            if (newClientOrderId != "") parameters.Add("newClientOrderId", newClientOrderId);
             parameters.Add("recvWindow", recvWindowStr);
             parameters.Add("newOrderRespType", newOrderRespTypeStr);
             parameters.Add("timestamp", timestampStr);
@@ -508,15 +514,28 @@ namespace BinanceWebAPI
         }
 
         //-- Max 5 symbols
-        public JContainer GetIsolatedMarginAccountInfo(string[] symbols = null, int recvWindow = 5000)
+        public JObject GetIsolatedMarginAccountInfo(string[] symbols = null, int recvWindow = 5000)
         {
             HandleRequestDelay();
-            string timestampStr = GetCurrentUnixTimeMillisStr();
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
             //string symbolsStr = "[\"" + string.Join("\",\"", symbols) + "\"]";
 
-            string data = $"{(symbols == null ? "" : $"symbols=\"{string.Join(",",symbols)}\"&")}timestamp={timestampStr}&recvWindow={recvWindowStr}";
-            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/isolated/account?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+            string data = $"{(symbols == null ? "" : $"symbols=\"{string.Join(",", symbols)}\"&")}timestamp={GetCurrentUnixTimeMillisStr()}&recvWindow={recvWindowStr}";
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/isolated/account?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
+        }
+
+        public JContainer GetAllCrossMarginPairs()
+        {
+            HandleRequestDelay();
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/allPairs", HttpMethod.Get) as JContainer;
+        }
+
+        public JObject GetCrossMarginAccountDetails(int recvWindow = 5000)
+        {
+            HandleRequestDelay();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+            string data = $"timestamp={GetCurrentUnixTimeMillisStr()}&recvWindow={recvWindowStr}";
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/account?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
         }
 
         //-- WALLET
