@@ -5,11 +5,10 @@ using System.Net.Http;
 using System.Net;
 using System.Security.Cryptography;
 using Newtonsoft.Json.Linq;
-using WebSocketSharp;
 
 namespace BinanceWebAPI
 {
-    public delegate void RequestSending(object sender, HTTPRequestArgs args);
+    public delegate void RequestSendingHandler(object sender, HTTPRequestArgs args);
     //public delegate void MarginWSConnected(object sender, EventArgs args);
     //public delegate void MarginWSError(object sender, EventArgs args);
 
@@ -23,20 +22,21 @@ namespace BinanceWebAPI
 
     public class BinanceAPI : IDisposable
     {
-        public event RequestSending RequestSending;
+        public event RequestSendingHandler RequestSending;
         //public event MarginWSConnected MarginWSConnected;
         //public event MarginWSError MarginWSError;
 
-        private void OnRequestSending(HttpRequestMessage msg)
+        protected virtual void OnRequestSending(HttpRequestMessage msg)
         {
-            if (RequestSending == null) return;
-            RequestSending(this, new HTTPRequestArgs
+            RequestSending?.Invoke(this, new HTTPRequestArgs
+            //RequestSending?.BeginInvoke(this, new HTTPRequestArgs
             {
                 Content = msg.Content,
                 Headers = msg.Headers,
                 Method = msg.Method,
                 Uri = msg.RequestUri
             });
+            //}, null, null);
         }
 
         //private void OnMarginWSConnected()

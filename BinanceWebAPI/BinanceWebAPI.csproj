@@ -3,8 +3,8 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <AssemblyVersion>1.5.0.0</AssemblyVersion>
-    <Version>1.5.0</Version>
+    <AssemblyVersion>1.5.1.0</AssemblyVersion>
+    <Version>1.5.1</Version>
     <Authors>Nain</Authors>
     <Copyright>Nain</Copyright>
     <Description>C# library to communicate with the official Binance API.</Description>
@@ -26,8 +26,8 @@
     <PackageReference Include="WebSocketSharp-netstandard" Version="1.0.1" />
   </ItemGroup>
 
-  <Target Name="CopyPackage" AfterTargets="Pack">
-    <Copy SourceFiles="$(ProjectDir)\bin\release\$(PackageId).$(PackageVersion).nupkg" DestinationFolder="..\..\..\..\NUGET-PACKAGES" />
+  <Target Name="CopyPackage" AfterTargets="Pack" Condition="'$(Configuration)'=='RELEASE'">
+    <Copy SourceFiles="$(ProjectDir)\bin\release\$(PackageId).$(PackageVersion).nupkg" DestinationFolder="$(workspace)\nuget-packages" />
   </Target>
 
 </Project>
