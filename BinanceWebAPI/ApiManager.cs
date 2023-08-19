@@ -60,7 +60,7 @@ namespace BinanceWebAPI
 
         //private static WebSocket MarginWSCLient;
 
-        public BinanceAPI(string baseEndpoint, string apiKey, string secretKey, int requestDelayMilliseconds)
+        public BinanceAPI(string baseEndpoint = "https://api.binance.com", string apiKey = "", string secretKey = "", int requestDelayMilliseconds = 0)
         {
             ConfigureProperties(baseEndpoint, apiKey, secretKey, requestDelayMilliseconds);
             Client.Timeout = TimeSpan.FromSeconds(15);
@@ -95,11 +95,6 @@ namespace BinanceWebAPI
         {
             return Convert.ToInt64(DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalMilliseconds).ToString();
         }
-
-        //public void MarginWSConnect()
-        //{
-        //    MarginWSCLient = new WebSocket()
-        //}
 
         //-- SPOT ACCOUNT
         public JObject SpotLimitOrder(string symbol, OrderSide side, decimal quantity, decimal price, OrderTimeInForce timeInForce, string newClientOrderId = "",
@@ -245,6 +240,35 @@ namespace BinanceWebAPI
             string data = $"symbol={symbol}" + (orderId == 0 ? "" : $"&orderId={orderIdStr}") +
                 (startTimeUnixMillis == 0 ? "" : $"&startTime={startTimeStr}") +
                 (endTimeUnixMillis == 0 ? "" : $"&endTime={endTimeStr}") +
+                (limit == 0 ? "" : $"&limit={limitStr}") +
+                $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
+
+            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+        }
+
+        /// <summary>
+        /// Get trades for a specific account and symbol. Weight(IP): 10.
+        /// </summary>
+        /// <param name="orderId">This can only be used in combination with symbol.</param>
+        /// <param name="fromId">TradeId to fetch from. Default gets most recent trades.</param>
+        /// <param name="recvWindow">The value cannot be greater than 60000.</param>
+        /// <returns></returns>
+        public JContainer QuerySpotTrades(string symbol, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
+            int fromId = 0, int limit = 500, int recvWindow = 5000)
+        {
+            string endpoint = "/api/v3/myTrades";
+
+            string orderIdStr = orderId.ToString();
+            string startTimeStr = startTimeUnixMillis.ToString();
+            string endTimeStr = endTimeUnixMillis.ToString();
+            string limitStr = (limit > 1000 ? 1000 : limit).ToString();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+
+            string data = $"symbol={symbol}" + (orderId == 0 ? "" : $"&orderId={orderIdStr}") +
+                (startTimeUnixMillis == 0 ? "" : $"&startTime={startTimeStr}") +
+                (endTimeUnixMillis == 0 ? "" : $"&endTime={endTimeStr}") +
+                (fromId == 0 ? "" : $"&fromId={fromId}") +
                 (limit == 0 ? "" : $"&limit={limitStr}") +
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
@@ -536,6 +560,36 @@ namespace BinanceWebAPI
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
             string data = $"timestamp={GetCurrentUnixTimeMillisStr()}&recvWindow={recvWindowStr}";
             return SendRequest($"{BaseEndpoint}/sapi/v1/margin/account?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
+        }
+
+        /// <summary>
+        /// Get trades for a specific account and symbol. Weight(IP): 10.
+        /// </summary>
+        /// <param name="orderId">This can only be used in combination with symbol.</param>
+        /// <param name="fromId">TradeId to fetch from. Default gets most recent trades.</param>
+        /// <param name="recvWindow">The value cannot be greater than 60000.</param>
+        /// <returns></returns>
+        public JContainer QueryMarginTrades(string symbol, bool isIsolated = false, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
+            int fromId = 0, int limit = 500, int recvWindow = 5000)
+        {
+            string endpoint = "/sapi/v1/margin/myTrades";
+
+            string orderIdStr = orderId.ToString();
+            string startTimeStr = startTimeUnixMillis.ToString();
+            string endTimeStr = endTimeUnixMillis.ToString();
+            string limitStr = (limit > 1000 ? 1000 : limit).ToString();
+            string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
+            string timestampStr = GetCurrentUnixTimeMillisStr();
+
+            string data = $"symbol={symbol}" + (!isIsolated ? "" : $"&isIsolated={isIsolated}") + 
+                (orderId == 0 ? "" : $"&orderId={orderIdStr}") +
+                (startTimeUnixMillis == 0 ? "" : $"&startTime={startTimeStr}") +
+                (endTimeUnixMillis == 0 ? "" : $"&endTime={endTimeStr}") +
+                (fromId == 0 ? "" : $"&fromId={fromId}") +
+                (limit == 0 ? "" : $"&limit={limitStr}") +
+                $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
+
+            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
         }
 
         //-- WALLET

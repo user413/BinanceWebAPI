@@ -1,10 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFramework>netstandard2.1</TargetFramework>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <AssemblyVersion>1.5.1.0</AssemblyVersion>
-    <Version>1.5.1</Version>
+    <AssemblyVersion>1.6.0</AssemblyVersion>
+    <Version>1.6.0</Version>
     <Authors>Nain</Authors>
     <Copyright>Nain</Copyright>
     <Description>C# library to communicate with the official Binance API.</Description>
