@@ -5,8 +5,9 @@ using System.Net.Http;
 using System.Net;
 using System.Security.Cryptography;
 using Newtonsoft.Json.Linq;
+using Nain.Utility;
 
-namespace BinanceWebAPI
+namespace Nain.BinanceAPI
 {
     public delegate void RequestSendingHandler(object sender, HTTPRequestArgs args);
     //public delegate void MarginWSConnected(object sender, EventArgs args);
@@ -51,28 +52,37 @@ namespace BinanceWebAPI
         //    MarginWSError(this, EventArgs.Empty);
         //}
 
-        private readonly HttpClient Client = new HttpClient();
+        private HttpClient Client = new HttpClient();
         private HMACSHA256 HashObj = new HMACSHA256();
+        private Timer RequestsTimer;
         private string BaseEndpoint = "";
-        private DateTime LastRequestTime = new DateTime();
-        private int RequestDelayMilliseconds; //-- DELAY IN MILLISECONDS BETWEEN EVERY REQUEST
+        //private DateTime LastRequestTime = new DateTime();
+        //private int RequestDelayMilliseconds; //-- DELAY IN MILLISECONDS BETWEEN EVERY REQUEST
         private readonly object APILockObj = new object();
 
         //private static WebSocket MarginWSCLient;
 
-        public BinanceAPI(string baseEndpoint = "https://api.binance.com", string apiKey = "", string secretKey = "", int requestDelayMilliseconds = 0)
+        /// <param name="requestsTimeoutMillis">Timeout for all requests.</param>
+        /// <param name="requestDelayMillis">Delay time between every requests, in milliseconds.</param>
+        public BinanceAPI(string baseEndpoint = "https://api.binance.com", string apiKey = "", string secretKey = "", uint requestsTimeoutMillis = 15000,
+            uint requestDelayMillis = 0)
         {
-            ConfigureProperties(baseEndpoint, apiKey, secretKey, requestDelayMilliseconds);
-            Client.Timeout = TimeSpan.FromSeconds(15);
+            ConfigureProperties(baseEndpoint, apiKey, secretKey, requestsTimeoutMillis, requestDelayMillis);
+            //Client.Timeout = TimeSpan.FromSeconds(15);
         }
 
-        public void ConfigureProperties(string baseEndpoint, string akey, string skey, int requestDelayMilliseconds)
+        /// <inheritdoc cref="BinanceAPI.BinanceAPI"/>
+        public void ConfigureProperties(string baseEndpoint = "https://api.binance.com", string apiKey = "", string secretKey = "", uint requestsTimeoutMillis = 15000,
+            uint requestDelayMillis = 0)
         {
+            Client = new HttpClient();
             BaseEndpoint = baseEndpoint;
-            RequestDelayMilliseconds = requestDelayMilliseconds;
-            HashObj = new HMACSHA256(Encoding.UTF8.GetBytes(skey));
+            //RequestDelayMilliseconds = requestDelayMilliseconds;
+            Client.Timeout = requestsTimeoutMillis == 0 ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(requestsTimeoutMillis);
+            RequestsTimer = new Timer(TimeSpan.FromMilliseconds(requestDelayMillis), false);
+            HashObj = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey));
             Client.DefaultRequestHeaders.Remove("X-MBX-APIKEY");
-            Client.DefaultRequestHeaders.Add("X-MBX-APIKEY", akey);
+            Client.DefaultRequestHeaders.Add("X-MBX-APIKEY", apiKey);
         }
 
         private string GenerateSignature(string data)
@@ -86,8 +96,11 @@ namespace BinanceWebAPI
         {
             lock (APILockObj)
             {
-                while ((DateTime.Now - LastRequestTime).TotalMilliseconds < RequestDelayMilliseconds) System.Threading.Thread.Sleep(100);
-                LastRequestTime = DateTime.Now;
+                //while ((DateTime.Now - LastRequestTime).TotalMilliseconds < RequestDelayMilliseconds) System.Threading.Thread.Sleep(100);
+                //LastRequestTime = DateTime.Now;
+
+                RequestsTimer.Wait();
+                RequestsTimer.Start();
             }
         }
 
@@ -97,6 +110,11 @@ namespace BinanceWebAPI
         }
 
         //-- SPOT ACCOUNT
+
+        /// <param name="newClientOrderId">A unique id among open orders. Automatically generated if not sent.</param>
+        /// <param name="recvWindow">Number of milliseconds after timestamp the request is valid for. The value cannot be greater than 60000.</param>
+        /// <param name="newOrderRespType">Set the response JSON. MARKET and LIMIT order types default to FULL, all other orders default to ACK.</param>
+        /// <param name="testRequest"></param>
         public JObject SpotLimitOrder(string symbol, OrderSide side, decimal quantity, decimal price, OrderTimeInForce timeInForce, string newClientOrderId = "",
             int recvWindow = 5000, OrderRespType newOrderRespType = OrderRespType.FULL, bool testRequest = false)
         {
@@ -131,6 +149,7 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}{endpoint}", HttpMethod.Post, parameters) as JObject;
         }
 
+        /// <inheritdoc cref="SpotLimitOrder"/>
         public JObject SpotMarketOrder(string symbol, OrderSide side, MarketOrderQtyType quantityType, decimal quantity, string newClientOrderId = "",
             int recvWindow = 5000, OrderRespType newOrderRespType = OrderRespType.FULL, bool testRequest = false)
         {
@@ -212,7 +231,7 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/api/v3/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject ;
         }
 
-        public JContainer QuerySpotOpenOrders(string symbol = "", int recvWindow = 5000)
+        public JArray QuerySpotOpenOrders(string symbol = "", int recvWindow = 5000)
         {
             HandleRequestDelay();
             string timestampStr = GetCurrentUnixTimeMillisStr();
@@ -220,11 +239,11 @@ namespace BinanceWebAPI
 
             string data = (symbol == "" ? "" : $"symbol={symbol}&") + $"timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}/api/v3/openOrders?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+            return SendRequest($"{BaseEndpoint}/api/v3/openOrders?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JArray;
         }
 
         //-- If orderId is set, it will get orders >= that orderId. Otherwise most recent orders are returned.
-        public JContainer QueryAllSpotOrders(string symbol, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
+        public JArray QueryAllSpotOrders(string symbol, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
             int limit = 500, int recvWindow = 5000)
         {
             HandleRequestDelay();
@@ -243,7 +262,7 @@ namespace BinanceWebAPI
                 (limit == 0 ? "" : $"&limit={limitStr}") +
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JArray;
         }
 
         /// <summary>
@@ -253,7 +272,7 @@ namespace BinanceWebAPI
         /// <param name="fromId">TradeId to fetch from. Default gets most recent trades.</param>
         /// <param name="recvWindow">The value cannot be greater than 60000.</param>
         /// <returns></returns>
-        public JContainer QuerySpotTrades(string symbol, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
+        public JArray QuerySpotTrades(string symbol, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
             int fromId = 0, int limit = 500, int recvWindow = 5000)
         {
             string endpoint = "/api/v3/myTrades";
@@ -272,27 +291,29 @@ namespace BinanceWebAPI
                 (limit == 0 ? "" : $"&limit={limitStr}") +
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JArray;
         }
 
         //-- MARKET DATA
-        public object Ping()
-        {
-            return SendRequest($"{BaseEndpoint}/api/v3/ping", HttpMethod.Get);
-        }
+        public void Ping() => SendRequest($"{BaseEndpoint}/api/v3/ping", HttpMethod.Get);
 
+        /// <summary>
+        /// Current exchange trading rules and symbol information.
+        /// </summary>
         public JObject GetExchangeInfo()
         {
             HandleRequestDelay();
             return SendRequest($"{BaseEndpoint}/api/v3/exchangeInfo", HttpMethod.Get) as JObject;
         }
 
+        /// <inheritdoc cref="GetExchangeInfo()"/>
         public JObject GetExchangeInfo(string symbol)
         {
             HandleRequestDelay();
             return SendRequest($"{BaseEndpoint}/api/v3/exchangeInfo?symbol={symbol}", HttpMethod.Get) as JObject;
         }
 
+        /// <inheritdoc cref="GetExchangeInfo()"/>
         public JObject GetExchangeInfo(string[] symbols)
         {
             HandleRequestDelay();
@@ -300,6 +321,9 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/api/v3/exchangeInfo?symbols={symbolsStr}", HttpMethod.Get) as JObject;
         }
 
+        /// <summary>
+        /// Latest price for a symbol or symbols.
+        /// </summary>
         public JObject PriceTicker(string symbol = "")
         {
             HandleRequestDelay();
@@ -307,12 +331,12 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/api/v3/ticker/price?{data}", HttpMethod.Get) as JObject;
         }
 
-        public JContainer CandlestickData(string symbol, ChartInterval interval, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0, int limit = 500)
+        public JArray CandlestickData(string symbol, ChartInterval interval, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0, int limit = 500)
         {
             HandleRequestDelay();
             string data = $"symbol={symbol}&interval={EnumToString(interval)}" + (startTimeUnixMillis > 0 ? $"&startTime={startTimeUnixMillis}" : "") +
                 (endTimeUnixMillis > 0 ? $"&endTime={endTimeUnixMillis}" : "") + (limit != 500 ? $"&limit={limit}" : "");
-            return SendRequest($"{BaseEndpoint}/api/v3/klines?{data}", HttpMethod.Get) as JContainer;
+            return SendRequest($"{BaseEndpoint}/api/v3/klines?{data}", HttpMethod.Get) as JArray;
         }
 
         public JObject AveragePrice(string symbol)
@@ -340,19 +364,19 @@ namespace BinanceWebAPI
             SendRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}", HttpMethod.Put);
         }
 
-        public JObject CreateMarginListenKey()
+        public JObject CreateCrossMarginListenKey()
         {
             HandleRequestDelay();
             return SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream", HttpMethod.Post) as JObject;
         }
 
-        public void CloseMarginListenKey(string listenKey)
+        public void CloseCrossMarginListenKey(string listenKey)
         {
             HandleRequestDelay();
             SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream?listenKey={listenKey}", HttpMethod.Delete);
         }
 
-        public void RenewMarginListenKey(string listenKey)
+        public void RenewCrossMarginListenKey(string listenKey)
         {
             HandleRequestDelay();
             SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream?listenKey={listenKey}", HttpMethod.Put);
@@ -377,6 +401,8 @@ namespace BinanceWebAPI
         }
 
         //-- MARGIN ACCOUNT
+
+        /// <inheritdoc cref="SpotLimitOrder"/>
         public JObject MarginLimitOrder(string symbol, OrderSide side, decimal quantity, decimal price, OrderTimeInForce timeInForce, bool isIsolated = false,
             OrderSideEffect sideEffectType = OrderSideEffect.NO_SIDE_EFFECT, string newClientOrderId = "", int recvWindow = 5000, 
             OrderRespType newOrderRespType = OrderRespType.FULL)
@@ -414,6 +440,7 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/sapi/v1/margin/order", HttpMethod.Post, parameters) as JObject;
         }
 
+        /// <inheritdoc cref="SpotLimitOrder"/>
         public JObject MarginMarketOrder(string symbol, OrderSide side, MarketOrderQtyType quantityType, decimal quantity, bool isIsolated = false,
             OrderSideEffect sideEffectType = OrderSideEffect.NO_SIDE_EFFECT, string newClientOrderId = "", int recvWindow = 5000,
             OrderRespType newOrderRespType = OrderRespType.FULL)
@@ -498,7 +525,7 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/sapi/v1/margin/order?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
         }
 
-        public JContainer QueryMarginOpenOrders(string symbol = "", bool isIsolated = false, int recvWindow = 5000)
+        public JArray QueryMarginOpenOrders(string symbol = "", bool isIsolated = false, int recvWindow = 5000)
         {
             HandleRequestDelay();
             string timestampStr = GetCurrentUnixTimeMillisStr();
@@ -506,11 +533,11 @@ namespace BinanceWebAPI
 
             string data = $"{(symbol == "" ? "" : $"symbol={symbol}&")}{(isIsolated ? $"isIsolated=TRUE" : "")}&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/openOrders?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/openOrders?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JArray;
         }
 
         //-- If orderId is set, it will get orders >= that orderId. Otherwise most recent orders are returned.
-        public JContainer QueryAllMarginOrders(string symbol, bool isIsolated = false, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
+        public JArray QueryAllMarginOrders(string symbol, bool isIsolated = false, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
             int limit = 500, int recvWindow = 5000)
         {
             HandleRequestDelay();
@@ -528,7 +555,7 @@ namespace BinanceWebAPI
                 (limit == 0 ? "" : $"&limit={limitStr}") +
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/allOrders?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/allOrders?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JArray;
         }
 
         public JObject MarginPriceIndex(string symbol)
@@ -548,10 +575,10 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/sapi/v1/margin/isolated/account?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
         }
 
-        public JContainer GetAllCrossMarginPairs()
+        public JArray GetAllCrossMarginPairs()
         {
             HandleRequestDelay();
-            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/allPairs", HttpMethod.Get) as JContainer;
+            return SendRequest($"{BaseEndpoint}/sapi/v1/margin/allPairs", HttpMethod.Get) as JArray;
         }
 
         public JObject GetCrossMarginAccountDetails(int recvWindow = 5000)
@@ -569,7 +596,7 @@ namespace BinanceWebAPI
         /// <param name="fromId">TradeId to fetch from. Default gets most recent trades.</param>
         /// <param name="recvWindow">The value cannot be greater than 60000.</param>
         /// <returns></returns>
-        public JContainer QueryMarginTrades(string symbol, bool isIsolated = false, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
+        public JArray QueryMarginTrades(string symbol, bool isIsolated = false, long orderId = 0, long startTimeUnixMillis = 0, long endTimeUnixMillis = 0,
             int fromId = 0, int limit = 500, int recvWindow = 5000)
         {
             string endpoint = "/sapi/v1/margin/myTrades";
@@ -589,7 +616,7 @@ namespace BinanceWebAPI
                 (limit == 0 ? "" : $"&limit={limitStr}") +
                 $"&timestamp={timestampStr}&recvWindow={recvWindowStr}";
 
-            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JArray;
         }
 
         //-- WALLET
@@ -602,14 +629,14 @@ namespace BinanceWebAPI
             return SendRequest($"{BaseEndpoint}/sapi/v1/asset/tradeFee?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JObject;
         }
 
-        public JContainer GetSpotAccountCoins(int recvWindow = 5000)
+        public JArray GetSpotAccountCoins(int recvWindow = 5000)
         {
             HandleRequestDelay();
             string endpoint = "/sapi/v1/capital/config/getall";
             string timestampStr = GetCurrentUnixTimeMillisStr();
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
             string data = $"timestamp={timestampStr}&recvWindow={recvWindowStr}";
-            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JContainer;
+            return SendRequest($"{BaseEndpoint}{endpoint}?{data}&signature={GenerateSignature(data)}", HttpMethod.Get) as JArray;
         }
 
         //-- REQUEST METHOD
@@ -692,7 +719,10 @@ namespace BinanceWebAPI
             return resultJson;
         }
 
-        private void HandleBinanceErrorResponse(HttpResponseMessage response, dynamic resultJson)
+        /// <summary>
+        /// Attempts to deserialize the Binance return code into a BinanceAPIException.
+        /// </summary>
+        private void HandleBinanceErrorResponse(HttpResponseMessage response, JToken resultJson)
         {
             APIErrorCode errorCode;
             //int errorCode;
@@ -700,14 +730,14 @@ namespace BinanceWebAPI
 
             try
             {
-                errorCode = (APIErrorCode)int.Parse(resultJson.code.ToString());
+                errorCode = (APIErrorCode)int.Parse(resultJson["code"].ToString());
                 //errorCode = int.Parse(resultJson.code.ToString());
-                message = resultJson.msg.ToString();
+                message = resultJson["msg"].ToString();
             }
             catch (Exception e)
             {
                 //throw new Exception($"{(int)response.StatusCode} {response.StatusCode + Environment.NewLine + resultJson}");
-                throw new ResponseException("Failed to deserialize API error response.", response.StatusCode, resultJson, e);
+                throw new ResponseException("Failed to deserialize API error response.", response.StatusCode, response.Content.ToString(), e);
             }
 
             //-- THROWS A BINANCEAPIAEXCEPTION IF THE RETURNED JSON CONTENT IS AN ERROR CODE FROM THE API
@@ -762,6 +792,9 @@ namespace BinanceWebAPI
         }
     }
 
+    /// <summary>
+    /// Occurs when a request reached the exchange and an error code is returned, representing specific API errors.
+    /// </summary>
     public class BinanceAPIException : Exception
     {
         public APIErrorCode ErrorCode { get; }
@@ -776,6 +809,11 @@ namespace BinanceWebAPI
         }
     }
 
+    /// <summary>
+    /// Occurs when a request is sent and a response is retrieved with an error, but doesn't represent an error code 
+    /// from the exchange (unlike BinanceAPIException). Could also mean that it's message couldn't be deserialized. 
+    /// Used to catch 404 HTTP errors, for example.
+    /// </summary>
     public class ResponseException : Exception
     {
         public HttpStatusCode StatusCode { get; }

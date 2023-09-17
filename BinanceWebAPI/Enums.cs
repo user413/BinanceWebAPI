@@ -1,4 +1,4 @@
-﻿namespace BinanceWebAPI
+﻿namespace Nain.BinanceAPI
 {
     public enum OrderType
     {
@@ -38,7 +38,8 @@
         BALANCE_NOT_ENOUGH = -6012,
         CANCEL_REJECTED = -2011,
         REJECTED_MBX_KEY = -2015,
-        INVALID_SIGNATURE = -1022
+        INVALID_SIGNATURE = -1022,
+        BAD_SYMBOL = -1121
     }
 
     public enum OrderStatus
