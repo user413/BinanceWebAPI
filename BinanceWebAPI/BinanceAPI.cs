@@ -170,9 +170,13 @@ namespace Nain.BinanceAPI
             parameters.Add("symbol", symbol);
             parameters.Add("side", sideStr);
             parameters.Add("type", "MARKET");
-            if (quantityType == MarketOrderQtyType.Quote) parameters.Add("quoteOrderQty", quantityStr);
+            
+            if (quantityType == MarketOrderQtyType.Quote)
+                parameters.Add("quoteOrderQty", quantityStr);
+            else 
+                parameters.Add("quantity", quantityStr);
+
             if (newClientOrderId != "") parameters.Add("newClientOrderId", newClientOrderId);
-            else parameters.Add("quantity", quantityStr);
             parameters.Add("recvWindow", recvWindowStr);
             parameters.Add("newOrderRespType", newOrderRespTypeStr);
             parameters.Add("timestamp", timestampStr);

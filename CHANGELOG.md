@@ -1,3 +1,7 @@
+## 1.6.3
+
+- Spot market order signature - fix
+
 ## 1.6.1
 
 - Documentation comments added
