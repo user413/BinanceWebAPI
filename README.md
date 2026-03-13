@@ -9,9 +9,4 @@
     - Placing and retrieving order information (limit and market)
     - Asset balances information
     - Connection to websocket (user data streams)
-  - Essential exchange information
-#### Exceptions:
-|Type|Description|Properties|
-|:------------ |:------------|-|
-|BinanceAPIException|Occurs when a request reached the exchange and an error code is returned, representing specific API errors|Http status code, API error code|
-|ResponseException|Occurs when a request is sent and a response is retrieved with an error, but doesn't represent an error code from the exchange|Http status code, response text|
+  - Exchange information

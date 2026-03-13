@@ -1,3 +1,8 @@
+## 1.7.0
+
+- Implementation of the new user data stream websocket structure
+- Implementation of the Ed25519 API key encryption
+
 ## 1.6.3
 
 - Spot market order signature - fix

@@ -1,11 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Net.Http;
-using System.Net;
-using System.Security.Cryptography;
+﻿using Nain.Utility;
 using Newtonsoft.Json.Linq;
-using Nain.Utility;
+using NSec.Cryptography;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Nain.BinanceAPI
 {
@@ -21,11 +23,19 @@ namespace Nain.BinanceAPI
         public System.Net.Http.Headers.HttpRequestHeaders Headers { get; set; }
     }
 
+    public enum EncryptionType { HMAC, Ed25519 }
+
     public class BinanceAPI : IDisposable
     {
         public event RequestSendingHandler RequestSending;
         //public event MarginWSConnected MarginWSConnected;
         //public event MarginWSError MarginWSError;
+        
+        /// <summary>
+        /// Returns whether the instance is configured through the constructor or the ConfigureProperties method with the required parameters, 
+        /// and is ready to be used. In case an error ocurred during configuration, IsConfigured will be false.
+        /// </summary>
+        public bool IsConfigured { get; private set; } = false;
 
         protected virtual void OnRequestSending(HttpRequestMessage msg)
         {
@@ -53,44 +63,136 @@ namespace Nain.BinanceAPI
         //}
 
         private HttpClient Client = new HttpClient();
-        private HMACSHA256 HashObj = new HMACSHA256();
+        private EncryptionType EncryptionType;
         private Timer RequestsTimer;
         private string BaseEndpoint = "";
         //private DateTime LastRequestTime = new DateTime();
         //private int RequestDelayMilliseconds; //-- DELAY IN MILLISECONDS BETWEEN EVERY REQUEST
-        private readonly object APILockObj = new object();
+        private readonly object APILockObj = new();
+
+        //-- Encruption objects
+        private HMACSHA256 HMACAlgo = new();
+        private readonly Ed25519 Ed25519Algo = SignatureAlgorithm.Ed25519;
+        private Key Ed25519PrivateKey;
 
         //private static WebSocket MarginWSCLient;
 
+        /// <summary>
+        /// Creates an instance that requires further configuration before use. To configure it the ConfigureProperties method. IsConfigured property 
+        /// indicates whether the instance was properly configured.
+        /// </summary>
+        public BinanceAPI() { }
+
         /// <param name="requestsTimeoutMillis">Timeout for all requests.</param>
         /// <param name="requestDelayMillis">Delay time between every requests, in milliseconds.</param>
-        public BinanceAPI(string baseEndpoint = "https://api.binance.com", string apiKey = "", string secretKey = "", uint requestsTimeoutMillis = 15000,
-            uint requestDelayMillis = 0)
+        public BinanceAPI(EncryptionType encryptionType, string apiKey, string privateKey, string baseEndpoint = "https://api.binance.com",
+            uint requestsTimeoutMillis = 15000, uint requestDelayMillis = 0)
         {
-            ConfigureProperties(baseEndpoint, apiKey, secretKey, requestsTimeoutMillis, requestDelayMillis);
+            ConfigureProperties(encryptionType, apiKey, privateKey, baseEndpoint, requestsTimeoutMillis, requestDelayMillis);
             //Client.Timeout = TimeSpan.FromSeconds(15);
         }
 
-        /// <inheritdoc cref="BinanceAPI.BinanceAPI"/>
-        public void ConfigureProperties(string baseEndpoint = "https://api.binance.com", string apiKey = "", string secretKey = "", uint requestsTimeoutMillis = 15000,
-            uint requestDelayMillis = 0)
+        /// <inheritdoc cref="BinanceAPI(EncryptionType, string, string, string, uint, uint)"/>
+        public void ConfigureProperties(EncryptionType encryptionType, string apiKey, string privateKey, string baseEndpoint = "https://api.binance.com", 
+            uint requestsTimeoutMillis = 15000, uint requestDelayMillis = 0)
         {
-            Client = new HttpClient();
-            BaseEndpoint = baseEndpoint;
-            //RequestDelayMilliseconds = requestDelayMilliseconds;
-            Client.Timeout = requestsTimeoutMillis == 0 ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(requestsTimeoutMillis);
-            RequestsTimer = new Timer(TimeSpan.FromMilliseconds(requestDelayMillis), false);
-            HashObj = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey));
-            Client.DefaultRequestHeaders.Remove("X-MBX-APIKEY");
-            Client.DefaultRequestHeaders.Add("X-MBX-APIKEY", apiKey);
+            try
+            {
+                Client = new HttpClient();
+                BaseEndpoint = baseEndpoint;
+                Client.Timeout = requestsTimeoutMillis <= 0 ? TimeSpan.FromMilliseconds(1) : TimeSpan.FromMilliseconds(requestsTimeoutMillis);
+                RequestsTimer = new Timer(TimeSpan.FromMilliseconds(requestDelayMillis), false);
+                //Client.DefaultRequestHeaders.Remove("X-MBX-APIKEY");
+                Client.DefaultRequestHeaders.Add("X-MBX-APIKEY", apiKey);
+                EncryptionType = encryptionType;
+
+                try
+                {
+                    if (encryptionType == EncryptionType.HMAC)
+                        HMACAlgo = new HMACSHA256(Encoding.UTF8.GetBytes(privateKey));
+                    else
+                        Ed25519PrivateKey = Key.Import(Ed25519Algo, Encoding.UTF8.GetBytes($"-----BEGIN PRIVATE KEY-----{Environment.NewLine}{privateKey}{Environment.NewLine}" +
+                            $"-----END PRIVATE KEY-----"), KeyBlobFormat.PkixPrivateKeyText);
+                }
+                catch (Exception e)
+                {
+                    throw new InvalidPrivateKeyException("Couldn't import private key.", e);
+                }
+            }
+            catch (Exception)
+            {
+                IsConfigured = false;
+                throw;
+            }
+
+            IsConfigured = true;
         }
 
-        private string GenerateSignature(string data)
+        public string GenerateSignature(string data)
         {
-            //string signature = Convert.ToBase64String(hashObj.ComputeHash(Encoding.UTF32.GetBytes(data)));
-            return BitConverter.ToString(HashObj.ComputeHash(Encoding.UTF8.GetBytes(data))).Replace("-", "").ToLower();
-            //string signature = System.Text.Encoding.UTF8.GetString(hashObj.ComputeHash(Encoding.UTF8.GetBytes(data)),);
+            if (EncryptionType == EncryptionType.HMAC)
+            {
+                //return BitConverter.ToString(HMACAlgo.ComputeHash(Encoding.UTF8.GetBytes(data))).Replace("-", "").ToLower();
+                return Convert.ToHexString(HMACAlgo.ComputeHash(Encoding.UTF8.GetBytes(data))).ToLower();
+            }
+            else
+            {
+                //return WebUtility.UrlEncode(Convert.ToBase64String(Ed25519Algo.Sign(Ed25519PrivateKey, Encoding.UTF8.GetBytes(data))));
+                return Convert.ToBase64String(Ed25519Algo.Sign(Ed25519PrivateKey, Encoding.UTF8.GetBytes(data)));
+            }
+
+
+            // -- BOUNCYCASTLE
+            ////AsymmetricKeyParameter privateKey = PrivateKeyFactory.CreateKey(Encoding.UTF8.GetBytes(SecretKey));
+
+            ////PemReader pr = new PemReader(new StringReader(SecretKey));
+            ////var privateKey = (Ed25519PrivateKeyParameters)pr.ReadObject();
+
+            //var privateKey = new Ed25519PrivateKeyParameters(Encoding.UTF8.GetBytes(SecretKey), 0);
+            ////var privateKey = new Ed25519PrivateKeyParameters(Convert.FromBase64String(SecretKey), 0);
+
+            //Ed25519Signer signer = new Ed25519Signer();
+            //signer.Init(true, privateKey);
+            //byte[] utf8Data = Encoding.UTF8.GetBytes(data);
+            //signer.BlockUpdate(utf8Data, 0, utf8Data.Length);
+            ////return WebUtility.UrlEncode(Convert.ToBase64String(signer.GenerateSignature()));
+            //return Convert.ToBase64String(signer.GenerateSignature());
+            ////return Convert.ToHexString(signer.GenerateSignature()).ToLower();
+
+
+            //-- NSEC
+            //var algo = SignatureAlgorithm.Ed25519;
+            //var privateKey = Key.Import(algo, Encoding.UTF8.GetBytes(SecretKey), KeyBlobFormat.PkixPrivateKeyText);
+            ////var privateKey = Key.Import(algo, Encoding.UTF8.GetBytes(SecretKey), KeyBlobFormat.RawPrivateKey);
+
+            ////return Convert.ToBase64String(algo.Sign(privateKey, Encoding.UTF8.GetBytes(data)));
+            //return WebUtility.UrlEncode(Convert.ToBase64String(algo.Sign(privateKey, Encoding.UTF8.GetBytes(data))));
+
         }
+
+        //public (string publicKey, string privateKey) GenerateEd25519Keys()
+        //{
+        //    AsymmetricCipherKeyPair pair = GenerateEd25519KeyPair();
+
+        //    return (
+        //    // LOOKS LIKE THIS: MFECAQEwBQYDK2VwBCIEILsEge5WaqgtTxcCIsFEOb7uKOSt3OKv5tLYEwj76wJkgSEAqmebzAIssKXcbEha8s4XJ5AsOgyXZFj8NEVuyUESTdw=
+        //    Convert.ToBase64String(SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(pair.Public).GetEncoded()),
+        //    Convert.ToBase64String(PrivateKeyInfoFactory.CreatePrivateKeyInfo(pair.Private).GetEncoded())
+
+        //    // LOOKS LIKE THIS: eAJj/hjFJmGtP/9FBaPcbiYTRlr42P5przZpyaQaRMw=
+        //    //Convert.ToBase64String(((Ed25519PublicKeyParameters)pair.Public).GetEncoded()),
+        //    //Convert.ToBase64String(((Ed25519PrivateKeyParameters)pair.Private).GetEncoded())
+
+        //    // FROM BINANCE GENERATOR LOOKS LIKE THIS: MC4CAQAwBQYDK2VwBCIEIImMk4Dlo4FY0OmTSz8w5i1sIH+7rP40X8+0QdbpxHdg
+        //    );
+        //}
+
+        //private AsymmetricCipherKeyPair GenerateEd25519KeyPair()
+        //{
+        //    var keyPairGenerator = new Ed25519KeyPairGenerator();
+        //    keyPairGenerator.Init(new Ed25519KeyGenerationParameters(new SecureRandom()));
+        //    return keyPairGenerator.GenerateKeyPair();
+        //}
 
         private void HandleRequestDelay()
         {
@@ -104,10 +206,13 @@ namespace Nain.BinanceAPI
             }
         }
 
-        private string GetCurrentUnixTimeMillisStr()
+        public static string GetCurrentUnixTimeMillisStr()
         {
             return Convert.ToInt64(DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalMilliseconds).ToString();
         }
+
+        public static string JoinParameters(Dictionary<string, string> parameters, bool urlEncode = true) => 
+            string.Join("&", parameters.Select(p => $"{p.Key}={(urlEncode ? WebUtility.UrlEncode(p.Value) : p.Value)}"));
 
         //-- SPOT ACCOUNT
 
@@ -129,9 +234,9 @@ namespace Nain.BinanceAPI
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
             string newOrderRespTypeStr = newOrderRespType.ToString();
 
-            string data = $"symbol={symbol}&side={sideStr}&type=LIMIT&quantity={quantityStr}&price={priceStr}&timeInForce={timeInForceStr}" +
-                $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}&recvWindow={recvWindowStr}&newOrderRespType={newOrderRespTypeStr}" +
-                $"&timestamp={timestampStr}";
+            //string data = $"symbol={symbol}&side={sideStr}&type=LIMIT&quantity={quantityStr}&price={priceStr}&timeInForce={timeInForceStr}" +
+            //    $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}&recvWindow={recvWindowStr}&newOrderRespType={newOrderRespTypeStr}" +
+            //    $"&timestamp={timestampStr}";
 
             var parameters = new Dictionary<string, string>();
             parameters.Add("symbol", symbol);
@@ -144,7 +249,8 @@ namespace Nain.BinanceAPI
             parameters.Add("recvWindow", recvWindowStr);
             parameters.Add("newOrderRespType", newOrderRespTypeStr);
             parameters.Add("timestamp", timestampStr);
-            parameters.Add("signature", GenerateSignature(data));
+            parameters.Add("signature", GenerateSignature(JoinParameters(parameters)));
+            //parameters.Add("signature", GenerateSignature(data));
 
             return SendRequest($"{BaseEndpoint}{endpoint}", HttpMethod.Post, parameters) as JObject;
         }
@@ -162,9 +268,9 @@ namespace Nain.BinanceAPI
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
             string newOrderRespTypeStr = newOrderRespType.ToString();
 
-            string data = $"symbol={symbol}&side={sideStr}&type=MARKET{(quantityType == MarketOrderQtyType.Quote ? "&quoteOrderQty=" : "&quantity=")}{quantityStr}" +
-                $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}&recvWindow={recvWindowStr}&newOrderRespType={newOrderRespTypeStr}" +
-                $"&timestamp={timestampStr}";
+            //string data = $"symbol={symbol}&side={sideStr}&type=MARKET{(quantityType == MarketOrderQtyType.Quote ? "&quoteOrderQty=" : "&quantity=")}{quantityStr}" +
+            //    $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}&recvWindow={recvWindowStr}&newOrderRespType={newOrderRespTypeStr}" +
+            //    $"&timestamp={timestampStr}";
 
             var parameters = new Dictionary<string, string>();
             parameters.Add("symbol", symbol);
@@ -180,7 +286,7 @@ namespace Nain.BinanceAPI
             parameters.Add("recvWindow", recvWindowStr);
             parameters.Add("newOrderRespType", newOrderRespTypeStr);
             parameters.Add("timestamp", timestampStr);
-            parameters.Add("signature", GenerateSignature(data));
+            parameters.Add("signature", GenerateSignature(JoinParameters(parameters)));
 
             return SendRequest($"{BaseEndpoint}{endpoint}", HttpMethod.Post, parameters) as JObject;
         }
@@ -350,58 +456,33 @@ namespace Nain.BinanceAPI
         }
 
         //-- USER DATA STREAMS
-        public JObject CreateSpotListenKey()
+
+        /// <summary>
+        /// With validityMillis being 0, the default time will be used (24 hours).
+        /// </summary>
+        public JObject CreateCrossMarginListenToken(int validityMillis = 0)
         {
             HandleRequestDelay();
-            return SendRequest($"{BaseEndpoint}/api/v3/userDataStream", HttpMethod.Post) as JObject;
+
+            var parameters = new Dictionary<string, string>();
+            if (validityMillis > 0) parameters.Add("validity", validityMillis.ToString());
+
+            return SendRequest($"{BaseEndpoint}/sapi/v1/userListenToken", HttpMethod.Post, parameters) as JObject;
         }
 
-        public void CloseSpotListenKey(string listenKey)
+        /// <summary>
+        /// With validityMillis being 0, the default time will be used (24 hours).
+        /// </summary>
+        public JObject CreateIsolatedMarginListenToken(string symbol, int validityMillis = 0)
         {
             HandleRequestDelay();
-            SendRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}", HttpMethod.Delete);
-        }
 
-        public void RenewSpotListenKey(string listenKey)
-        {
-            HandleRequestDelay();
-            SendRequest($"{BaseEndpoint}/api/v3/userDataStream?listenKey={listenKey}", HttpMethod.Put);
-        }
+            var parameters = new Dictionary<string, string>();
+            parameters.Add("symbol", symbol);
+            if (validityMillis > 0) parameters.Add("validity", validityMillis.ToString());
+            parameters.Add("isIsolated", "true");
 
-        public JObject CreateCrossMarginListenKey()
-        {
-            HandleRequestDelay();
-            return SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream", HttpMethod.Post) as JObject;
-        }
-
-        public void CloseCrossMarginListenKey(string listenKey)
-        {
-            HandleRequestDelay();
-            SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream?listenKey={listenKey}", HttpMethod.Delete);
-        }
-
-        public void RenewCrossMarginListenKey(string listenKey)
-        {
-            HandleRequestDelay();
-            SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream?listenKey={listenKey}", HttpMethod.Put);
-        }
-
-        public JObject CreateIsolatedMarginListenKey(string symbol)
-        {
-            HandleRequestDelay();
-            return SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream/isolated?symbol={symbol}", HttpMethod.Post) as JObject;
-        }
-
-        public void CloseIsolatedMarginListenKey(string symbol, string listenKey)
-        {
-            HandleRequestDelay();
-            SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream/isolated?symbol={symbol}&listenKey={listenKey}", HttpMethod.Delete);
-        }
-
-        public void RenewIsolatedMarginListenKey(string symbol, string listenKey)
-        {
-            HandleRequestDelay();
-            SendRequest($"{BaseEndpoint}/sapi/v1/userDataStream/isolated?symbol={symbol}&listenKey={listenKey}", HttpMethod.Put);
+            return SendRequest($"{BaseEndpoint}/sapi/v1/userListenToken", HttpMethod.Post, parameters) as JObject;
         }
 
         //-- MARGIN ACCOUNT
@@ -420,11 +501,11 @@ namespace Nain.BinanceAPI
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
             string newOrderRespTypeStr = newOrderRespType.ToString();
 
-            string data = $"symbol={symbol}&side={sideStr}&type=LIMIT&quantity={quantityStr}&price={priceStr}" +
-                $"&timeInForce={timeInForceStr}{(isIsolated ? $"&isIsolated=TRUE" : "")}" +
-                $"{(sideEffectType == OrderSideEffect.NO_SIDE_EFFECT ? "" : $"&sideEffectType={sideEffectType}")}" +
-                $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}" +
-                $"&recvWindow={recvWindowStr}&newOrderRespType={newOrderRespTypeStr}&timestamp={timestampStr}";
+            //string data = $"symbol={symbol}&side={sideStr}&type=LIMIT&quantity={quantityStr}&price={priceStr}" +
+            //    $"&timeInForce={timeInForceStr}{(isIsolated ? $"&isIsolated=TRUE" : "")}" +
+            //    $"{(sideEffectType == OrderSideEffect.NO_SIDE_EFFECT ? "" : $"&sideEffectType={sideEffectType}")}" +
+            //    $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}" +
+            //    $"&recvWindow={recvWindowStr}&newOrderRespType={newOrderRespTypeStr}&timestamp={timestampStr}";
 
             var parameters = new Dictionary<string, string>();
             parameters.Add("symbol", symbol);
@@ -439,7 +520,7 @@ namespace Nain.BinanceAPI
             parameters.Add("recvWindow", recvWindowStr);
             parameters.Add("newOrderRespType", newOrderRespTypeStr);
             parameters.Add("timestamp", timestampStr);
-            parameters.Add("signature", GenerateSignature(data));
+            parameters.Add("signature", GenerateSignature(JoinParameters(parameters)));
 
             return SendRequest($"{BaseEndpoint}/sapi/v1/margin/order", HttpMethod.Post, parameters) as JObject;
         }
@@ -456,10 +537,10 @@ namespace Nain.BinanceAPI
             string recvWindowStr = (recvWindow > 60000 ? 60000 : recvWindow).ToString();
             string newOrderRespTypeStr = newOrderRespType.ToString();
 
-            string data = $"symbol={symbol}&side={sideStr}&type=MARKET{(quantityType == MarketOrderQtyType.Quote ? "&quoteOrderQty=" : "&quantity=")}{quantityStr}" +
-                $"{(isIsolated ? $"&isIsolated=TRUE" : "")}{(sideEffectType == OrderSideEffect.NO_SIDE_EFFECT ? "" : $"&sideEffectType={sideEffectType}")}" +
-                $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}&recvWindow={recvWindowStr}&newOrderRespType={newOrderRespTypeStr}" +
-                $"&timestamp={timestampStr}";
+            //string data = $"symbol={symbol}&side={sideStr}&type=MARKET{(quantityType == MarketOrderQtyType.Quote ? "&quoteOrderQty=" : "&quantity=")}{quantityStr}" +
+            //    $"{(isIsolated ? $"&isIsolated=TRUE" : "")}{(sideEffectType == OrderSideEffect.NO_SIDE_EFFECT ? "" : $"&sideEffectType={sideEffectType}")}" +
+            //    $"{(newClientOrderId == "" ? "" : $"&newClientOrderId={newClientOrderId}")}&recvWindow={recvWindowStr}&newOrderRespType={newOrderRespTypeStr}" +
+            //    $"&timestamp={timestampStr}";
 
             var parameters = new Dictionary<string, string>();
             parameters.Add("symbol", symbol);
@@ -473,7 +554,7 @@ namespace Nain.BinanceAPI
             parameters.Add("recvWindow", recvWindowStr);
             parameters.Add("newOrderRespType", newOrderRespTypeStr);
             parameters.Add("timestamp", timestampStr);
-            parameters.Add("signature", GenerateSignature(data));
+            parameters.Add("signature", GenerateSignature(JoinParameters(parameters)));
 
             return SendRequest($"{BaseEndpoint}/sapi/v1/margin/order", HttpMethod.Post, parameters) as JObject;
         }
@@ -830,4 +911,19 @@ namespace Nain.BinanceAPI
             ResponseText = responseText;
         }
     }
+
+    public class InvalidPrivateKeyException : Exception
+    {
+        public InvalidPrivateKeyException() { }
+        public InvalidPrivateKeyException(string message) : base(message) { }
+        public InvalidPrivateKeyException(string message, Exception inner) : base(message, inner) { }
+    }
+
+    ///// <summary>
+    ///// Occurs when the instance was used without being configured correctly.
+    ///// </summary>
+    //public class InstanceNotConfigured : Exception
+    //{
+    //    public InstanceNotConfigured() : base("The API wasn't configured correctly.") { }
+    //}
 }
